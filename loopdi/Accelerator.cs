@@ -1,28 +1,35 @@
 ﻿using System;
+using System.Reactive.Subjects;
 using NStack;
 using Terminal.Gui;
 
 namespace loopdi
 {
-    public class Accelerator : Label
+    public class Accelerator : Label, IObservable<KeyEvent>
     {
-        private readonly Key    _Trigger;
-        private readonly Action _Action;
+        private Subject<KeyEvent> _KeyEvent = new Subject<KeyEvent>();
 
-        public Accelerator( int x, int y, ustring text, Key trigger, Action action ) : base( x, y, text )
+        public Accelerator( int x, int y, ustring text) : base( x, y, text )
         {
-            _Trigger = trigger;
-            _Action  = action;
         }
 
-
+        public override bool ProcessColdKey(KeyEvent keyEvent)
+        {
+            return base.ProcessColdKey(keyEvent);
+        }
+        public override bool ProcessKey(KeyEvent keyEvent)
+        {
+            return base.ProcessKey(keyEvent);
+        }
         public override bool ProcessHotKey( KeyEvent keyEvent )
         {
-            if (keyEvent.Key == _Trigger)
-            {
-                _Action();
-            }
+            _KeyEvent.OnNext(keyEvent);
             return base.ProcessHotKey( keyEvent );
+        }
+
+        public IDisposable Subscribe(IObserver<KeyEvent> observer)
+        {
+            return _KeyEvent.Subscribe(observer);
         }
     }
 }

@@ -10,14 +10,66 @@ using CSCore.Streams;
 
 namespace loopdi
 {
+    using CSCore.Codecs;
+    using CSCore.SoundOut;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Reactive;
+    using System.Reactive.Linq;
+    using System.Threading;
     using Terminal.Gui;
 
     class Demo : IDisposable
     {
-        private SerialDisposable state = new SerialDisposable();
+        private List<SerialDisposable> state = Enumerable.Range(0,10).Select(i=> new SerialDisposable()).ToList();
 
-        void Record()
+        public IObservable<Unit> PlayASound(string filename)
         {
+
+            return Observable.Create<Unit>(observer =>
+            {
+                //Contains the sound to play
+                IWaveSource soundSource = GetSoundSource(filename);
+                LoopStream ls = new LoopStream(soundSource);
+                //SoundOut implementation which plays the sound
+                ISoundOut soundOut = GetSoundOut();
+                //Tell the SoundOut which sound it has to play
+                soundOut.Initialize(ls);
+                //Play the sound
+                soundOut.Play();
+
+                return Disposable.Create(() =>
+                {
+                    //Stop the playback
+                    soundOut.Stop();
+                    soundOut.Dispose();
+                    soundSource.Dispose();
+                });
+            });
+
+
+
+        }
+
+
+        private ISoundOut GetSoundOut()
+        {
+            if (WasapiOut.IsSupportedOnCurrentPlatform)
+                return new WasapiOut();
+            else
+                return new DirectSoundOut();
+        }
+
+        private IWaveSource GetSoundSource(string filename)
+        {
+            // Instead of using the CodecFactory as helper, you specify the decoder directly:
+            var codec = CodecFactory.Instance.GetCodec(filename);
+            return codec;
+        }
+
+        void Record(int channel)
+        {
+            state[channel].Disposable = Disposable.Empty;
 
             //create a new soundIn instance
             ISoundIn soundIn = new WasapiCapture();
@@ -49,7 +101,7 @@ namespace loopdi
             //soundInSource yet
 
 
-            var waveWriter = new WaveWriter("test.wav", convertedSource.WaveFormat);
+            var waveWriter = new WaveWriter(channelFile(channel), convertedSource.WaveFormat);
 
             soundInSource.DataAvailable += ( s, e ) =>
             {
@@ -72,16 +124,27 @@ namespace loopdi
 
             //we've set everything we need -> start capturing data
             soundIn.Start();
-            state.Disposable = Disposable.Create( () =>
+            state[channel].Disposable = Disposable.Create( () =>
             {
                 soundIn.Stop();
                 waveWriter.Dispose();
             } );
         }
 
-        void Stop()
+        void Stop(int channel)
         {
-            state.Disposable = Disposable.Empty;
+            state[channel].Disposable = Disposable.Empty;
+        }
+
+        void Play(int channel)
+        {
+            state[channel].Disposable = Disposable.Empty;
+            state[channel].Disposable = PlayASound(channelFile(channel)).Repeat().Subscribe();
+        }
+
+        private static string channelFile(int channel)
+        {
+            return $"{channel}test.wav";
         }
 
         public void Start()
@@ -94,17 +157,35 @@ namespace loopdi
             top.Add( win );
 
 
-            win.Add(new Accelerator(0, 0, "(R)ecord", (Key)'r', Record));
-            win.Add(new Accelerator(0, 1, "(S)top", (Key)'s', Stop));
-
-
-
-            Application.Run();
+            var text = "[0-9]Channel Select\n(R)ecord\n(P)lay\n(S)top";
+            Console.WriteLine(text);
+            ConsoleKeyInfo keyinfo;
+            var currentChannel = 0;
+            do
+            {
+                keyinfo = Console.ReadKey(true);
+                switch (keyinfo.KeyChar)
+                {
+                    case 'r':
+                        Record(currentChannel);
+                        continue;
+                    case 'p':
+                        Play(currentChannel);
+                        continue;
+                    case 's':
+                        Stop(currentChannel);
+                        continue;
+                }
+                if (keyinfo.KeyChar >= '0' || keyinfo.KeyChar <= 9)
+                {
+                    currentChannel = (int)(keyinfo.KeyChar - '0');
+                }
+            } while (true);
         }
 
         public void Dispose()
         {
-            state.Dispose();
+            state.ForEach(c=>c.Dispose());
         }
     }
 
